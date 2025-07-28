@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Grow Garden Defense</title>
+  <link rel="apple-touch-icon" href="icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Garden Defense" />
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #d2f4c4;
+      user-select: none;
+    }
+    #ui {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px;
+      background: #5d7b2a;
+      color: white;
+    }
+    #game {
+      display: block;
+      margin: 0 auto;
+      background: #94c973;
+      border: 3px solid #3d5224;
+    }
+    button {
+      margin: 5px;
+      padding: 5px 10px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div>💰 <span id="money">100</span>원</div>
+    <div>
+      <button onclick="selectSeed('carrot')">🥕 당근 (10)</button>
+      <button onclick="selectSeed('strawberry')">🍓 딸기 (20)</button>
+      <button onclick="placeTower()">🛡️ 타워 설치 (50)</button>
+    </div>
+    <div>🌊 웨이브: <span id="wave">1</span></div>
+  </div>
+  <canvas id="game" width="640" height="480"></canvas>
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    let grid = [];
+    const gridSize = 64;
+    const rows = canvas.height / gridSize;
+    const cols = canvas.width / gridSize;
+
+    let selectedSeed = null;
+    let money = parseInt(localStorage.getItem('money') || 100);
+    let farms = JSON.parse(localStorage.getItem('farms') || '[]');
+    let towers = JSON.parse(localStorage.getItem('towers') || '[]');
+    let wave = parseInt(localStorage.getItem('wave') || 1);
+
+    const seeds = {
+      carrot: { cost: 10, growTime: 300, reward: 15, emoji: "🥕" },
+      strawberry: { cost: 20, growTime: 500, reward: 30, emoji: "🍓" }
+    };
+
+    const bugs = [];
+    const bullets = [];
+
+    function selectSeed(type) {
+      selectedSeed = type;
+    }
+
+    function placeTower() {
+      selectedSeed = null;
+      placingTower = true;
+    }
+
+    let placingTower = false;
+
+    canvas.addEventListener('click', (e) => {
+      const x = Math.floor(e.offsetX / gridSize);
+      const y = Math.floor(e.offsetY / gridSize);
+
+      const key = `${x},${y}`;
+
+      if (placingTower) {
+        if (!towers.find(t => t.x === x && t.y === y) && money >= 50) {
+          towers.push({ x, y });
+          money -= 50;
+          saveGame();
+        }
+        placingTower = false;
+        return;
+      }
+
+      const planted = farms.find(f => f.x === x && f.y === y);
+      if (planted) {
+        if (planted.timer <= 0) {
+          money += planted.reward;
+          farms = farms.filter(f => f !== planted);
+          saveGame();
+        }
+        return;
+      }
+
+      if (selectedSeed && !planted && money >= seeds[selectedSeed].cost) {
+        const s = seeds[selectedSeed];
+        farms.push({ x, y, type: selectedSeed, timer: s.growTime, reward: s.reward, emoji: s.emoji });
+        money -= s.cost;
+        saveGame();
+      }
+    });
+
+    function saveGame() {
+      localStorage.setItem('money', money);
+      localStorage.setItem('farms', JSON.stringify(farms));
+      localStorage.setItem('towers', JSON.stringify(towers));
+      localStorage.setItem('wave', wave);
+    }
+
+    function spawnBug() {
+      bugs.push({ x: 0, y: Math.floor(Math.random() * rows) * gridSize + 16, hp: wave * 5, speed: 0.5 + wave * 0.05 });
+    }
+
+    function gameLoop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw grid
+      for (let x = 0; x < cols; x++) {
+        for (let y = 0; y < rows; y++) {
+          ctx.strokeStyle = "#ccc";
+          ctx.strokeRect(x * gridSize, y * gridSize, gridSize, gridSize);
+        }
+      }
+
+      // Draw farms
+      farms.forEach(f => {
+        if (f.timer > 0) f.timer--;
+        ctx.font = "32px serif";
+        ctx.fillText(f.emoji, f.x * gridSize + 16, f.y * gridSize + 40);
+      });
+
+      // Draw towers
+      towers.forEach(t => {
+        ctx.fillStyle = "black";
+        ctx.fillRect(t.x * gridSize + 20, t.y * gridSize + 20, 24, 24);
+
+        if (Math.random() < 0.05) {
+          bullets.push({ x: t.x * gridSize + 32, y: t.y * gridSize + 32 });
+        }
+      });
+
+      // Draw bugs
+      bugs.forEach(b => {
+        b.x += b.speed;
+        ctx.fillStyle = "brown";
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 12, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Draw bullets
+      bullets.forEach((bu, i) => {
+        bu.x += 3;
+        ctx.fillStyle = "yellow";
+        ctx.beginPath();
+        ctx.arc(bu.x, bu.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        bugs.forEach((bug, j) => {
+          const dx = bu.x - bug.x;
+          const dy = bu.y - bug.y;
+          if (Math.sqrt(dx*dx + dy*dy) < 12) {
+            bug.hp -= 5;
+            bullets.splice(i, 1);
+          }
+        });
+      });
+
+      // Remove dead bugs
+      for (let i = bugs.length - 1; i >= 0; i--) {
+        if (bugs[i].hp <= 0) {
+          money += 10;
+          bugs.splice(i, 1);
+          saveGame();
+        } else if (bugs[i].x > canvas.width) {
+          alert("벌레가 정원을 먹어치웠어요!! 게임 오버 😭");
+          localStorage.clear();
+          location.reload();
+        }
+      }
+
+      // Update UI
+      document.getElementById("money").innerText = money;
+      document.getElementById("wave").innerText = wave;
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // 웨이브 타이머
+    setInterval(() => {
+      spawnBug();
+    }, 1000);
+
+    // 웨이브 증가
+    setInterval(() => {
+      wave++;
+      saveGame();
+    }, 15000); // 15초마다 웨이브 증가
+
+    gameLoop();
+  </script>
+</body>
+</html>
